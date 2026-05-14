@@ -130,7 +130,7 @@ class ReviewerManager {
     }
 }
 
-// ⚠️ THE GOD OBJECT — Preserved exactly as the baseline diagram specifies ⚠️
+//  THE GOD OBJECT — Preserved exactly as the baseline diagram specifies 
 // Manages loops, validation branching, reviewer orchestration, and evaluation trigger.
 // This is intentionally poor design, documented for Task 2 analysis.
 class SubmissionController {
