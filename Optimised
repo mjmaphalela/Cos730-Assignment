@@ -1,0 +1,289 @@
+import java.util.List;
+import java.util.ArrayList;
+import java.util.stream.Collectors;
+import java.io.OutputStream;
+import java.io.PrintStream;
+
+// =============================================================================
+// COS 730 — Assignment 2 | Task 5: Optimised Implementation
+// Implements the redesigned sequence diagram using GRASP principles:
+//   - Facade Pattern (SubmissionService)
+//   - Information Expert (ReviewerManager, EvaluationManager)
+//   - Low Coupling via EvaluationOutcome enum (polymorphic notification)
+//   - High Cohesion (each class owns only its domain logic)
+// =============================================================================
+
+// --- DOMAIN MODELS ---
+
+class OptSubmissionData {
+    public String id = "SUB-OPT-001";
+}
+
+class OptReviewer {
+    public String name;
+    public int    workload;
+    public boolean hasConflict;
+
+    public OptReviewer(String name, int workload, boolean hasConflict) {
+        this.name        = name;
+        this.workload    = workload;
+        this.hasConflict = hasConflict;
+    }
+}
+
+// Optimisation: replaces three separate notify methods with a single typed state object
+enum OptEvaluationOutcome {
+    ACCEPTED,
+    REJECTED,
+    REVISION_REQUIRED
+}
+
+// --- SYSTEM COMPONENTS ---
+
+class OptDatabase {
+    // Returns a realistic reviewer set including ineligible entries to demonstrate filtering
+    public List<OptReviewer> fetchReviewers() {
+        System.out.println("  [Database] Fetching all reviewers...");
+        List<OptReviewer> reviewers = new ArrayList<>();
+        reviewers.add(new OptReviewer("Dr. Smith",  1, false)); // Eligible
+        reviewers.add(new OptReviewer("Dr. Jones",  4, false)); // Over workload — filtered out
+        reviewers.add(new OptReviewer("Dr. Patel",  2, true));  // Has conflict — filtered out
+        reviewers.add(new OptReviewer("Dr. Lee",    2, false)); // Eligible
+        return reviewers;
+    }
+
+    public void saveSubmission(OptSubmissionData data) {
+        System.out.println("  [Database] Saved submission: " + data.id);
+    }
+
+    public void saveScore(int score) {
+        System.out.println("  [Database] Persisting score: " + score);
+    }
+}
+
+class OptValidator {
+    public boolean validate(OptSubmissionData data) {
+        System.out.println("  [Validator] Validating submission format...");
+        return data != null && data.id != null;
+    }
+}
+
+// Optimisation: single polymorphic sendOutcome() replaces notifyAcceptance/Rejection/Revision
+class OptNotificationService {
+    public void sendOutcome(OptEvaluationOutcome outcome) {
+        switch (outcome) {
+            case ACCEPTED:          System.out.println("  [NotificationService] Outcome: ACCEPTED"); break;
+            case REJECTED:          System.out.println("  [NotificationService] Outcome: REJECTED"); break;
+            case REVISION_REQUIRED: System.out.println("  [NotificationService] Outcome: REVISION REQUIRED"); break;
+        }
+    }
+
+    public void notifyError(String msg) {
+        System.out.println("  [NotificationService] Error: " + msg);
+    }
+}
+
+// =============================================================================
+// Information Expert: owns ALL evaluation logic.
+// The SubmissionService does not know HOW evaluation works — only that it happens.
+// =============================================================================
+class OptEvaluationManager {
+    private OptDatabase            database;
+    private OptNotificationService notifService;
+
+    public OptEvaluationManager(OptDatabase db, OptNotificationService ns) {
+        this.database     = db;
+        this.notifService = ns;
+    }
+
+    // Called internally per reviewer during the score collection loop
+    public void submitScore(int score) {
+        System.out.println("  [EvaluationManager] Receiving score: " + score);
+        database.saveScore(score);
+    }
+
+    // Optimisation: entire evaluation phase encapsulated here.
+    // SubmissionService triggers this with a single call — no leaking of internal steps.
+    public void executeEvaluation(List<OptReviewer> assignedReviewers) {
+        System.out.println("  [EvaluationManager] Executing evaluation...");
+
+        // Diagram: loop [each assigned Reviewer] — score collection managed internally
+        List<Integer> scores = new ArrayList<>();
+        for (OptReviewer r : assignedReviewers) {
+            System.out.println("  [Reviewer: " + r.name + "] Submitting score...");
+            int score = 80; // Stubbed score per reviewer
+            submitScore(score);
+            scores.add(score);
+        }
+
+        // Optimisation: calculateAverage and checkConsensus are internal — not visible externally
+        double avg = calculateAverage(scores);
+        checkConsensus(scores);
+
+        // Optimisation: single polymorphic call via enum — satisfies Open/Closed Principle
+        OptEvaluationOutcome outcome = determineOutcome(avg);
+        notifService.sendOutcome(outcome);
+    }
+
+    // Internal — not called by any outside component
+    private double calculateAverage(List<Integer> scores) {
+        System.out.println("  [EvaluationManager] Calculating average internally...");
+        if (scores.isEmpty()) return 0;
+        return scores.stream().mapToInt(Integer::intValue).average().orElse(0);
+    }
+
+    private void checkConsensus(List<Integer> scores) {
+        System.out.println("  [EvaluationManager] Checking consensus internally...");
+        // Stub: consensus validation logic
+    }
+
+    // Maps directly to Decision Table 2 (Task 3)
+    private OptEvaluationOutcome determineOutcome(double avg) {
+        if (avg >= 80) return OptEvaluationOutcome.ACCEPTED;          // Table 2, R1
+        if (avg >= 50) return OptEvaluationOutcome.REVISION_REQUIRED; // Table 2, R2
+        return OptEvaluationOutcome.REJECTED;                          // Table 2, R3
+    }
+}
+
+// =============================================================================
+// Information Expert: owns ALL reviewer allocation logic.
+// Handles DB fetch, conflict filtering, workload filtering, and assignment
+// internally — the SubmissionService does not see any of these steps.
+// =============================================================================
+class OptReviewerManager {
+    private OptDatabase database;
+    private static final int MAX_WORKLOAD = 3;
+
+    public OptReviewerManager(OptDatabase db) { this.database = db; }
+
+    // Optimisation: single declarative call replaces 3 separate controller-level calls
+    // (getAvailableReviewers + filterConflicts + checkWorkload) from the baseline.
+    public List<OptReviewer> allocateEligibleReviewers() {
+        System.out.println("  [ReviewerManager] Allocating eligible reviewers...");
+        List<OptReviewer> all = database.fetchReviewers();
+
+        // Optimisation: Java Streams — declarative, composable, and readable
+        // Maps to Decision Table 1, R2 (conflict) and R3 (workload) exclusion rules
+        List<OptReviewer> eligible = all.stream()
+                .filter(r -> !r.hasConflict)           // Decision Table 1: C2 = N
+                .filter(r -> r.workload < MAX_WORKLOAD) // Decision Table 1: C3 = Y
+                .collect(Collectors.toList());
+
+        for (OptReviewer r : eligible) {
+            System.out.println("  [ReviewerManager] Assigned reviewer: " + r.name);
+        }
+
+        return eligible; // Returned to SubmissionService — passed directly to EvaluationManager
+    }
+}
+
+// =============================================================================
+// Facade: pure orchestrator — zero business logic.
+// Only delegates to domain experts; satisfies Single Responsibility Principle.
+// =============================================================================
+class OptSubmissionService {
+    private OptValidator            validator;
+    private OptDatabase             database;
+    private OptReviewerManager      reviewerManager;
+    private OptEvaluationManager    evaluationManager;
+    private OptNotificationService  notificationService;
+
+    public OptSubmissionService(OptValidator v, OptDatabase d, OptReviewerManager rm,
+                                OptEvaluationManager em, OptNotificationService ns) {
+        this.validator           = v;
+        this.database            = d;
+        this.reviewerManager     = rm;
+        this.evaluationManager   = em;
+        this.notificationService = ns;
+    }
+
+    public void processSubmission(OptSubmissionData data) {
+        System.out.println("  [SubmissionService] Processing submission...");
+
+        // Step 1: Delegate validation — alt [invalid] handled by NotificationService
+        if (!validator.validate(data)) {
+            notificationService.notifyError("Format validation failed.");
+            return;
+        }
+
+        // Step 2: Persist submission
+        database.saveSubmission(data);
+
+        // Step 3: Delegate reviewer allocation — Information Expert handles all internals
+        List<OptReviewer> assignedReviewers = reviewerManager.allocateEligibleReviewers();
+
+        // Step 4: Delegate evaluation — EvaluationManager handles score collection + outcome
+        evaluationManager.executeEvaluation(assignedReviewers);
+    }
+}
+
+class OptUI {
+    private OptSubmissionService service;
+
+    public OptUI(OptSubmissionService service) { this.service = service; }
+
+    public void submitResearchOutput(OptSubmissionData data) {
+        System.out.println("  [UI] Researcher submitted research output.");
+        service.processSubmission(data);
+    }
+}
+
+// =============================================================================
+// DRIVER + TASK 6 BENCHMARK
+// =============================================================================
+public class OptimisedMain {
+
+    public static void main(String[] args) throws Exception {
+
+        // --- Single demonstrative run with full output ---
+        System.out.println("╔══════════════════════════════════════════════╗");
+        System.out.println("║  OPTIMISED SYSTEM — Single Demonstrative Run ║");
+        System.out.println("╚══════════════════════════════════════════════╝");
+        runOptimised();
+
+        // --- Task 6: Benchmark over 1000 runs ---
+        System.out.println("\n╔══════════════════════════════════════════════╗");
+        System.out.println("║  OPTIMISED BENCHMARK — 1000 Runs             ║");
+        System.out.println("╚══════════════════════════════════════════════╝");
+
+        PrintStream originalOut = System.out;
+
+        // Suppress console output so I/O cost does not dominate the measurement
+        System.setOut(new PrintStream(new OutputStream() {
+            public void write(int b) {}
+        }));
+
+        int RUNS = 1000;
+
+        // JVM warmup — ensures JIT compilation is active before timing
+        for (int i = 0; i < 100; i++) { runOptimised(); }
+
+        // Timed benchmark
+        long start = System.nanoTime();
+        for (int i = 0; i < RUNS; i++) { runOptimised(); }
+        long end = System.nanoTime();
+
+        System.setOut(originalOut);
+
+        double totalMs = (end - start) / 1_000_000.0;
+        double avgMs   = totalMs / RUNS;
+
+        System.out.printf("  Runs completed : %d%n",      RUNS);
+        System.out.printf("  Total time     : %.3f ms%n", totalMs);
+        System.out.printf("  Average / run  : %.4f ms%n", avgMs);
+        System.out.println("\n  >> Record this average for Task 6 comparison table.");
+    }
+
+    // Isolated run method — used by benchmark loop
+    static void runOptimised() {
+        OptDatabase            db                  = new OptDatabase();
+        OptValidator           validator            = new OptValidator();
+        OptNotificationService notificationService  = new OptNotificationService();
+        OptReviewerManager     reviewerManager      = new OptReviewerManager(db);
+        OptEvaluationManager   evaluationManager    = new OptEvaluationManager(db, notificationService);
+        OptSubmissionService   service              = new OptSubmissionService(validator, db, reviewerManager, evaluationManager, notificationService);
+        OptUI                  ui                  = new OptUI(service);
+        ui.submitResearchOutput(new OptSubmissionData());
+    }
+}
+
