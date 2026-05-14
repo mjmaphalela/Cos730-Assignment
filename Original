@@ -1,0 +1,257 @@
+import java.util.List;
+import java.util.ArrayList;
+import java.io.OutputStream;
+import java.io.PrintStream;
+
+// =============================================================================
+// COS 730 — Assignment 2 | Task 1: Baseline Implementation
+// Implements the sequence diagram EXACTLY — no optimisations applied.
+// Intentional design flaws preserved: God Object, scattered logic, high coupling.
+// =============================================================================
+
+// --- DOMAIN MODELS ---
+class SubmissionData {
+    public String id = "SUB-001";
+}
+
+class Reviewer {
+    public String name;
+    public Reviewer(String name) { this.name = name; }
+}
+
+class Score {
+    public int value;
+    public Score(int value) { this.value = value; }
+}
+
+// --- SYSTEM COMPONENTS ---
+
+class Database {
+    public boolean saveSubmission(SubmissionData data) {
+        System.out.println("  [Database] Saving submission " + data.id + "...");
+        return true;
+    }
+
+    // FIX: Returns a real reviewer list so assignment and score loops execute
+    public List<Reviewer> fetchReviewers() {
+        System.out.println("  [Database] Fetching all reviewers...");
+        List<Reviewer> reviewers = new ArrayList<>();
+        reviewers.add(new Reviewer("Dr. Adams"));
+        reviewers.add(new Reviewer("Dr. Brooks"));
+        reviewers.add(new Reviewer("Dr. Carter"));
+        return reviewers;
+    }
+
+    public void saveScore(Score score) {
+        System.out.println("  [Database] Persisting score: " + score.value);
+    }
+}
+
+class Validator {
+    // Diagram: Validator.validateFormat(data) → valid/invalid
+    public boolean validateFormat(SubmissionData data) {
+        System.out.println("  [Validator] Executing format validation...");
+        return data != null && data.id != null;
+    }
+}
+
+class NotificationService {
+    // Three separate methods — tight coupling flaw preserved as per diagram
+    public void notifyAcceptance() { send("ACCEPTED"); }
+    public void notifyRejection()  { send("REJECTED"); }
+    public void notifyRevision()   { send("REVISION REQUIRED"); }
+    private void send(String msg)  { System.out.println("  [NotificationService] Outcome: " + msg); }
+}
+
+class EvaluationManager {
+    private Database database;
+    private NotificationService notificationService;
+
+    public EvaluationManager(Database db, NotificationService ns) {
+        this.database = db;
+        this.notificationService = ns;
+    }
+
+    // Diagram: loop [each reviewer] — Reviewer calls submitScore(score) on EvaluationManager
+    public void submitScore(Score score) {
+        System.out.println("  [EvaluationManager] Receiving score from reviewer...");
+        database.saveScore(score);
+    }
+
+    // Diagram: SubmissionController.startEvaluation() — triggers evaluation chain
+    public void startEvaluation() {
+        System.out.println("  [EvaluationManager] Starting evaluation process...");
+        calculateAverage();
+        checkConsensus();
+        applyRules();
+    }
+
+    private void calculateAverage() {
+        System.out.println("  [EvaluationManager] Calculating average...");
+    }
+
+    private void checkConsensus() {
+        System.out.println("  [EvaluationManager] Checking consensus...");
+    }
+
+    // Diagram: alt [accepted] / [rejected] / [revision] — hard-coded branching (design flaw)
+    private void applyRules() {
+        System.out.println("  [EvaluationManager] Applying rules to determine outcome...");
+        String outcome = "accepted"; // Stubbed outcome
+        if (outcome.equals("accepted"))      { notificationService.notifyAcceptance(); }
+        else if (outcome.equals("rejected")) { notificationService.notifyRejection(); }
+        else                                 { notificationService.notifyRevision(); }
+    }
+}
+
+class ReviewerManager {
+    private Database database;
+
+    public ReviewerManager(Database db) { this.database = db; }
+
+    // Diagram: SubmissionController calls getAvailableReviewers() then filters are applied
+    public List<Reviewer> getAvailableReviewers() {
+        System.out.println("  [ReviewerManager] Getting available reviewers...");
+        List<Reviewer> all = database.fetchReviewers();
+        List<Reviewer> conflictFree = filterConflicts(all);
+        return checkWorkload(conflictFree);
+    }
+
+    // Diagram: filterConflicts(reviewerList) — called on ReviewerManager
+    private List<Reviewer> filterConflicts(List<Reviewer> reviewers) {
+        System.out.println("  [ReviewerManager] Filtering conflicts...");
+        return reviewers; // Stub: no conflicts in this dataset
+    }
+
+    // Diagram: checkWorkload(reviewerList) — called on ReviewerManager
+    private List<Reviewer> checkWorkload(List<Reviewer> reviewers) {
+        System.out.println("  [ReviewerManager] Checking workload...");
+        return reviewers; // Stub: all pass workload threshold
+    }
+}
+
+// ⚠️ THE GOD OBJECT — Preserved exactly as the baseline diagram specifies ⚠️
+// Manages loops, validation branching, reviewer orchestration, and evaluation trigger.
+// This is intentionally poor design, documented for Task 2 analysis.
+class SubmissionController {
+    private Validator validator;
+    private Database database;
+    private ReviewerManager reviewerManager;
+    private EvaluationManager evaluationManager;
+
+    public SubmissionController(Validator v, Database d, ReviewerManager rm, EvaluationManager em) {
+        this.validator = v;
+        this.database = d;
+        this.reviewerManager = rm;
+        this.evaluationManager = em;
+    }
+
+    public void submit(SubmissionData data) {
+        System.out.println("  [SubmissionController] Received submission...");
+
+        // Diagram: Validator.validateFormat(data) — alt [invalid] path
+        if (!validator.validateFormat(data)) {
+            System.out.println("  [UI] Error returned: Invalid format.");
+            return; // Terminate flow — matches alt [invalid] block
+        }
+
+        // Diagram: Database.saveSubmission(data) + confirmation
+        database.saveSubmission(data);
+
+        // Diagram: ReviewerManager.getAvailableReviewers() — controller pulls raw data
+        List<Reviewer> filteredReviewers = reviewerManager.getAvailableReviewers();
+
+        // Diagram: loop [assign reviewers] — controller manages assignment loop (God Object flaw)
+        for (Reviewer r : filteredReviewers) {
+            assignReview(r);
+        }
+
+        // Diagram: loop [each reviewer] — each reviewer submits a score to EvaluationManager
+        // FIX: This loop was missing from the original submission
+        for (Reviewer r : filteredReviewers) {
+            System.out.println("  [Reviewer: " + r.name + "] Submitting score...");
+            Score score = new Score(75); // Stubbed score value
+            evaluationManager.submitScore(score);
+        }
+
+        // Diagram: EvaluationManager.startEvaluation()
+        evaluationManager.startEvaluation();
+    }
+
+    // Diagram: SubmissionController assigns each reviewer — responsibility flaw preserved
+    private void assignReview(Reviewer reviewer) {
+        System.out.println("  [SubmissionController] Assigning review to: " + reviewer.name);
+    }
+}
+
+// Diagram: UI receives submitResearchOutput(data) from Researcher
+class UI {
+    private SubmissionController controller;
+
+    public UI(SubmissionController controller) { this.controller = controller; }
+
+    public void submitResearchOutput(SubmissionData data) {
+        System.out.println("  [UI] Researcher submitted research output.");
+        controller.submit(data);
+    }
+}
+
+// =============================================================================
+// DRIVER + TASK 6 BENCHMARK
+// =============================================================================
+public class BaselineMain {
+
+    public static void main(String[] args) throws Exception {
+
+        // --- Single demonstrative run with full output ---
+        System.out.println("╔══════════════════════════════════════════════╗");
+        System.out.println("║   BASELINE SYSTEM — Single Demonstrative Run ║");
+        System.out.println("╚══════════════════════════════════════════════╝");
+        runBaseline();
+
+        // --- Task 6: Benchmark over 1000 runs ---
+        System.out.println("\n╔══════════════════════════════════════════════╗");
+        System.out.println("║   BASELINE BENCHMARK — 1000 Runs             ║");
+        System.out.println("╚══════════════════════════════════════════════╝");
+
+        PrintStream originalOut = System.out;
+
+        // Suppress console output so I/O cost doesn't dominate the measurement
+        System.setOut(new PrintStream(new OutputStream() {
+            public void write(int b) {}
+        }));
+
+        int RUNS = 1000;
+
+        // JVM warmup — ensures JIT compilation is active before timing
+        for (int i = 0; i < 100; i++) { runBaseline(); }
+
+        // Timed benchmark
+        long start = System.nanoTime();
+        for (int i = 0; i < RUNS; i++) { runBaseline(); }
+        long end = System.nanoTime();
+
+        System.setOut(originalOut);
+
+        double totalMs = (end - start) / 1_000_000.0;
+        double avgMs   = totalMs / RUNS;
+
+        System.out.printf("  Runs completed : %d%n",    RUNS);
+        System.out.printf("  Total time     : %.3f ms%n", totalMs);
+        System.out.printf("  Average / run  : %.4f ms%n", avgMs);
+        System.out.println("\n  >> Record this average for Task 6 comparison table.");
+    }
+
+    // Isolated run method — used by benchmark loop
+    static void runBaseline() {
+        Database             db                  = new Database();
+        Validator            validator            = new Validator();
+        NotificationService  notificationService  = new NotificationService();
+        ReviewerManager      reviewerManager      = new ReviewerManager(db);
+        EvaluationManager    evaluationManager    = new EvaluationManager(db, notificationService);
+        SubmissionController controller           = new SubmissionController(validator, db, reviewerManager, evaluationManager);
+        UI                   ui                  = new UI(controller);
+        ui.submitResearchOutput(new SubmissionData());
+    }
+}
+
